@@ -58,7 +58,7 @@ if __name__=='__main__':
         exit(-1)
 
     eval_config_dict = {'remove_empty_box': True, 'use_3d_nms': True, 'nms_iou': 0.25,
-        'use_old_type_nms': False, 'cls_nms': False, 'per_class_proposal': False,
+        'use_old_type_nms': False, 'cls_nms': True, 'per_class_proposal': True,
         'conf_thresh': 0.5, 'dataset_config': DC}
 
     # Init the model and optimzier
