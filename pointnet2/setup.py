@@ -4,6 +4,8 @@
 # LICENSE file in the root directory of this source tree.
 
 from setuptools import setup
+import torch
+
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 import glob
 
