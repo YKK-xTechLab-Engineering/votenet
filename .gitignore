@@ -1,0 +1,6 @@
+data
+demo_files
+
+*.pyc
+
+__pycache__/
