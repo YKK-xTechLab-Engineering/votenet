@@ -11,7 +11,9 @@ import sys
 import numpy as np
 import argparse
 import importlib
+import json
 import time
+from pathlib import Path
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='sunrgbd', help='Dataset: sunrgbd or scannet [default: sunrgbd]')
@@ -22,12 +24,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = BASE_DIR
-sys.path.append(os.path.join(ROOT_DIR, 'utils'))
-sys.path.append(os.path.join(ROOT_DIR, 'models'))
-from pc_util import random_sampling, read_ply
-from ap_helper import parse_predictions
+from votenet.utils.pc_util import random_sampling, read_ply
+from votenet.models.ap_helper import parse_predictions
+from votenet.models import VoteNet
+from votenet.models.dump_helper import dump_results
 
 def preprocess_point_cloud(point_cloud):
     ''' Prepare the numpy point cloud (N,3) for forward pass '''
@@ -40,17 +40,16 @@ def preprocess_point_cloud(point_cloud):
     return pc
 
 if __name__=='__main__':
-    
+    ROOT_DIR = Path(__file__).parent
     # Set file paths and dataset config
-    demo_dir = os.path.join(BASE_DIR, 'demo_files') 
+    demo_dir = os.path.join(ROOT_DIR, 'demo_files') 
     if FLAGS.dataset == 'sunrgbd':
-        sys.path.append(os.path.join(ROOT_DIR, 'sunrgbd'))
-        from sunrgbd_detection_dataset import DC # dataset config
+        from votenet.sunrgbd.sunrgbd_detection_dataset import DC # dataset config
         checkpoint_path = os.path.join(demo_dir, 'pretrained_votenet_on_sunrgbd.tar')
         pc_path = os.path.join(demo_dir, 'input_pc_sunrgbd.ply')
+        from votenet.sunrgbd.sunrgbd_utils import class2type, type2class
     elif FLAGS.dataset == 'scannet':
-        sys.path.append(os.path.join(ROOT_DIR, 'scannet'))
-        from scannet_detection_dataset import DC # dataset config
+        from votenet.scannet.scannet_detection_dataset import DC # dataset config
         checkpoint_path = os.path.join(demo_dir, 'pretrained_votenet_on_scannet.tar')
         pc_path = os.path.join(demo_dir, 'input_pc_scannet.ply')
     else:
@@ -58,13 +57,12 @@ if __name__=='__main__':
         exit(-1)
 
     eval_config_dict = {'remove_empty_box': True, 'use_3d_nms': True, 'nms_iou': 0.25,
-        'use_old_type_nms': False, 'cls_nms': True, 'per_class_proposal': True,
+        'use_old_type_nms': False, 'cls_nms': True, 'per_class_proposal': False,
         'conf_thresh': 0.5, 'dataset_config': DC}
 
     # Init the model and optimzier
-    MODEL = importlib.import_module('votenet') # import network module
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    net = MODEL.VoteNet(num_proposal=256, input_feature_dim=1, vote_factor=1,
+    net = VoteNet(num_proposal=256, input_feature_dim=1, vote_factor=1,
         sampling='seed_fps', num_class=DC.num_class,
         num_heading_bin=DC.num_heading_bin,
         num_size_cluster=DC.num_size_cluster,
@@ -95,8 +93,31 @@ if __name__=='__main__':
     end_points['point_clouds'] = inputs['point_clouds']
     pred_map_cls = parse_predictions(end_points, eval_config_dict)
     print('Finished detection. %d object detected.'%(len(pred_map_cls[0])))
-  
+    # print(len(pred_map_cls))
     dump_dir = os.path.join(demo_dir, '%s_results'%(FLAGS.dataset))
     if not os.path.exists(dump_dir): os.mkdir(dump_dir) 
-    MODEL.dump_results(end_points, dump_dir, DC, True)
+    dump_results(end_points, dump_dir, DC, True)
     print('Dumped detection results to folder %s'%(dump_dir))
+
+    records = []
+    for class_idx, bbox, score in pred_map_cls[0]:
+        records.append({
+            'classname': class2type[class_idx],
+            'bbox': bbox.tolist(),
+            'score': score.tolist()
+        })
+        
+    with open(os.path.join(dump_dir, 'class2type.txt'), 'w') as f:
+        for class_idx, classname in class2type.items():
+            f.write(f"{class_idx} {classname}\n")
+    
+    with open(os.path.join(dump_dir, 'type2class.txt'), 'w') as f:
+        for classname, class_idx in type2class.items():
+            f.write(f"{classname} {class_idx}\n")
+    
+    with open(os.path.join(dump_dir, 'pred_map_cls.txt'), 'w') as f:
+        for record in records:
+            f.write(f"{record['classname']} {record['bbox']} {record['score']}\n")
+    
+    with open(os.path.join(dump_dir, 'pred_map_cls.json'), 'w') as f:
+        json.dump(records, f)
