@@ -480,6 +480,76 @@ def write_lines_as_cylinders(pcl, filename, rad=0.005, res=64):
     mesh_list = trimesh.util.concatenate(scene.dump())
     trimesh.io.export.export_mesh(mesh_list, '%s.ply'%(filename), file_type='ply')
 
+
+# ----------------------------------------
+# Oriented bbox utilities (extracted for reuse)
+# ----------------------------------------
+def oriented_bbox_corners(box7, camera_coord=False):
+    """Return 8 corner coordinates for an oriented box.
+
+    Args:
+        box7: (7,) array-like [cx, cy, cz, dx, dy, dz, heading]
+            - If camera_coord is False, heading is around Z axis (Z up)
+            - If camera_coord is True, heading is around Y axis (Y down)
+        camera_coord: whether to use the camera coordinate convention
+
+    Returns:
+        corners: (8, 3) numpy array of corners
+            Ordering corresponds to applying rotation to the 8 local corners;
+            no particular winding is guaranteed.
+    """
+    box7 = np.asarray(box7, dtype=float).reshape(-1)
+    assert box7.shape[0] == 7
+    cx, cy, cz, dx, dy, dz, heading = box7.tolist()
+
+    # Local corners centered at origin
+    hx, hy, hz = dx/2.0, dy/2.0, dz/2.0
+    local = np.array([
+        [ hx,  hy,  hz],
+        [-hx,  hy,  hz],
+        [-hx, -hy,  hz],
+        [ hx, -hy,  hz],
+        [ hx,  hy, -hz],
+        [-hx,  hy, -hz],
+        [-hx, -hy, -hz],
+        [ hx, -hy, -hz],
+    ], dtype=float)
+
+    if camera_coord:
+        # Rotation about Y axis (camera coordinates: Z forward, X right, Y down)
+        c = np.cos(heading)
+        s = np.sin(heading)
+        R = np.array([[ c, 0,  s],
+                      [ 0, 1,  0],
+                      [-s, 0,  c]], dtype=float)
+    else:
+        # Rotation about Z axis (upright coordinates: Z up, X right, Y forward)
+        c = np.cos(heading)
+        s = np.sin(heading)
+        R = np.array([[ c, -s, 0],
+                      [ s,  c, 0],
+                      [ 0,  0, 1]], dtype=float)
+
+    corners = (local @ R.T) + np.array([cx, cy, cz], dtype=float)
+    return corners
+
+
+def convert_camera_corners_to_upright(corners_cam):
+    """Convert 8x3 corners from camera coords to upright coords.
+
+    Camera coords: Z forward, X right, Y downward
+    Upright coords: X right, Y forward, Z upward
+
+    Mapping used: (x_upright, y_upright, z_upright) = (x_cam, z_cam, -y_cam)
+    """
+    pts = np.asarray(corners_cam, dtype=float)
+    assert pts.shape[-1] == 3
+    x = pts[..., 0]
+    y = pts[..., 1]
+    z = pts[..., 2]
+    out = np.stack([x, z, -y], axis=-1)
+    return out
+
 # ----------------------------------------
 # Testing
 # ----------------------------------------
